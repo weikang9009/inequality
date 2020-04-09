@@ -5,7 +5,8 @@ __author__ = "Sergio J. Rey <srey@asu.edu> "
 
 # from libpysal.common import *
 import numpy as np
-__all__ = ['Theil', 'TheilD', 'TheilDSim']
+import pandas as pd
+__all__ = ['Theil', 'TheilD', 'TheilDSim', 'TheilPop', 'TheilDPop']
 
 SMALL = np.finfo('float').tiny
 
@@ -198,4 +199,112 @@ class TheilDSim:
         self.bg_pvalue = bg_ct / (permutations * 1.0 + 1)
         self.bg = np.array([r.bg for r in results])
         self.wg = np.array([r.wg for r in results])
+
+
+class TheilPop:
+    """
+    Between-set heil's inequality measure.
+
+    Parameters
+    ----------
+    pci : array
+          (n,t) or (n,), per capita income.
+          With n taken as the observations across which
+          inequality is calculated. If pci is (n,) then a scalar inequality value is
+          determined. If pci is (n,t) then an array of inequality values are
+          determined, one value for each column in y.
+    pop : array
+          (n,t) or (n,), population.
+          With n taken as the observations across which
+          inequality is calculated. If Tpci is (n,) then a scalar inequality value is
+          determined. If pci is (n,t) then an array of inequality values are
+          determined, one value for each column in y.
+
+    Attributes
+    ----------
+
+    T   : array (t,) or (1,)
+          Theil's T for each column of y
+
+    """
+
+    def __init__(self, pci, pop):
+        pci = np.asarray(pci)
+        pop = np.asarray(pop)
+        total = pci * pop
+        y = total / total.sum(axis=0)  # state income share
+        x = pop / pop.sum(axis=0)  # state population share
+        self.T = (y * np.log(y / x)).sum(axis=0)
+
+
+class TheilDPop:
+    """
+    Between-set Theil's inequality measure and its further regional decomposition.
+
+    Parameters
+    ----------
+    pci : array
+          (n,t) or (n,), per capita income.
+          With n taken as the observations across which
+          inequality is calculated. If pci is (n,) then a scalar inequality value is
+          determined. If pci is (n,t) then an array of inequality values are
+          determined, one value for each column in y.
+    pop : array
+          (n,t) or (n,), population.
+          With n taken as the observations across which
+          inequality is calculated. If Tpci is (n,) then a scalar inequality value is
+          determined. If pci is (n,t) then an array of inequality values are
+          determined, one value for each column in y.
+    regime : array
+             (n, ), elements indicating which partition each observation belongs
+                to. These are assumed to be exhaustive.
+
+    Attributes
+    ----------
+    T  : array (n,t) or (n,)
+         global inequality T
+    bg : array (n,t) or (n,)
+         between regime inequality
+    wg : array (n,t) or (n,)
+         within regime inequality
+
+    """
+
+    def __init__(self, pci, pop, regime):
+        pci = np.asarray(pci)
+        pop = np.asarray(pop)
+        regime = np.asarray(regime)
+        total = pci * pop
+        y_t = total / total.sum(axis=0)  # state income share
+        x_t = pop / pop.sum(axis=0)  # state population share
+
+        def pd_theil(data):
+            eta = data.incshare.values / data.incshare.sum()
+            xi = data.popshare.values / data.popshare.sum()
+            return sum(eta * np.log(eta / xi))
+
+        t = pci.shape[1]
+        theil_w_all = np.zeros(t)
+        theil_b_all = np.zeros(t)
+        for i in range(t):
+            y = y_t[:, i]
+            x = x_t[:, i]
+            df = pd.DataFrame(np.array([regime, y, x]).T, columns=["regime", "incshare", "popshare"])
+            df_shareG = df.groupby("regime").sum()
+            X_g = df_shareG.popshare.values
+            Y_g = df_shareG.incshare.values
+            theil_b_all[i] = sum(Y_g * np.log(Y_g / X_g))
+
+            def pd_theil(data):
+                eta = data.incshare.values / data.incshare.sum()
+                xi = data.popshare.values / data.popshare.sum()
+                return sum(eta * np.log(eta / xi))
+
+            df_within = df.groupby("regime").apply(pd_theil)
+            I_g = df_within.values
+            theil_w_all[i] = sum(df_shareG.incshare.values * I_g)
+        self.T = theil_w_all + theil_b_all
+        self.bg = theil_b_all
+        self.wg = theil_w_all
+
 
